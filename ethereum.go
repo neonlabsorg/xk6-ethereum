@@ -86,7 +86,7 @@ func (c *Client) EstimateGas(tx Transaction) (uint64, error) {
 	to := ethgo.HexToAddress(tx.To)
 
 	msg := &ethgo.CallMsg{
-		From:     c.w.Address(),
+		From:     ethgo.HexToAddress(tx.From),
 		To:       &to,
 		Value:    big.NewInt(tx.Value),
 		Data:     tx.Input,
@@ -144,7 +144,7 @@ func (c *Client) SendRawTransaction(tx Transaction) (string, error) {
 
 	t := &ethgo.Transaction{
 		Type:     ethgo.TransactionLegacy,
-		From:     c.w.Address(),
+		From:     ethgo.HexToAddress(tx.From),
 		To:       &to,
 		Value:    big.NewInt(tx.Value),
 		Gas:      gas,
@@ -341,7 +341,8 @@ func (c *Client) pollForBlocks() {
 	for range time.Tick(500 * time.Millisecond) {
 		blockNumber, err := c.BlockNumber()
 		if err != nil {
-			panic(err)
+			fmt.Println("failed to get block number: ", err)
+			continue
 		}
 
 		if blockNumber > lastBlockNumber {
@@ -351,7 +352,8 @@ func (c *Client) pollForBlocks() {
 
 			block, err := c.GetBlockByNumber(ethgo.BlockNumber(blockNumber), false)
 			if err != nil {
-				panic(err)
+				fmt.Println("failed to get block: ", err)
+				continue
 			}
 			if block == nil {
 				// We're not going to continue past this point if we don't have a block
@@ -372,7 +374,7 @@ func (c *Client) pollForBlocks() {
 			prevBlock = block
 
 			rootTS := metrics.NewRegistry().RootTagSet()
-			if c.vu != nil || c.vu.State() != nil || rootTS != nil {
+			if c.vu != nil && c.vu.State() != nil && rootTS != nil {
 				if _, loaded := blocks.LoadOrStore(c.opts.URL+strconv.FormatUint(blockNumber, 10), true); loaded {
 					// We already have a block number for this client, so we can skip this
 					continue

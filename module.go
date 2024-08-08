@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/hex"
 	"encoding/json"
+	"math/big"
 	"errors"
 	"fmt"
 	"time"
@@ -102,10 +103,15 @@ func (mi *ModuleInstance) NewClient(call sobek.ConstructorCall) *sobek.Object {
 	if err != nil {
 		common.Throw(rt, fmt.Errorf("Can't create a new rpc client; reason: %w", err))
 	}
-
-	cid, err := c.Eth().ChainID()
-	if err != nil {
-		common.Throw(rt, fmt.Errorf("Can't get a chain id; reason: %w", err))
+	
+	var cid *big.Int
+	if opts.ChainId == nil {
+		cid, err = c.Eth().ChainID()
+		if err != nil {
+			common.Throw(rt, fmt.Errorf("Can't get a chain id; reason: %w", err))
+		}
+	} else {
+		cid = opts.ChainId
 	}
 
 	client := &Client{
@@ -117,7 +123,7 @@ func (mi *ModuleInstance) NewClient(call sobek.ConstructorCall) *sobek.Object {
 		opts:    opts,
 	}
 
-	go client.pollForBlocks()
+	// go client.pollForBlocks()
 
 	return rt.ToValue(client).ToObject(rt)
 }
@@ -153,6 +159,7 @@ type options struct {
 	URL        string `json:"url,omitempty"`
 	Mnemonic   string `json:"mnemonic,omitempty"`
 	PrivateKey string `json:"privateKey,omitempty"`
+	ChainId    *big.Int `json:"chainId,omitempty"`
 }
 
 // newOptionsFrom validates and instantiates an options struct from its map representation
