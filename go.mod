@@ -1,4 +1,4 @@
-module github.com/distribworks/xk6-ethereum
+module github.com/neonlabsorg/xk6-ethereum
 
 go 1.20
 

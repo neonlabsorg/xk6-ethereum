@@ -37,3 +37,21 @@ func (w *Wallet) GenerateKey() (*Key, error) {
 		Address:    k.Address().String(),
 	}, err
 }
+
+func (w *Wallet) NewWalletKeyFromPrivateKey(privateKey []byte) (*Key, error) {
+	wa, err := wallet.NewWalletFromPrivKey(privateKey)
+	if err != nil {
+		return nil, err
+	}
+
+	pk, err := wa.MarshallPrivateKey()
+	if err != nil {
+		return nil, err
+	}
+	pks := hex.EncodeToString(pk)
+
+	return &Key{
+		PrivateKey: pks,
+		Address:    wa.Address().String(),
+	}, err
+}
