@@ -35,7 +35,8 @@ type Transaction struct {
 
 type Client struct {
 	w       *wallet.Key
-	client  *jsonrpc.Client
+	client *jsonrpc.Client
+	clientTmp  *ClientTmp
 	chainID *big.Int
 	vu      modules.VU
 	metrics ethMetrics
@@ -56,7 +57,8 @@ func (c *Client) Call(method string, params ...interface{}) (interface{}, error)
 
 func (c *Client) GasPrice() (uint64, error) {
 	t := time.Now()
-	g, err := c.client.Eth().GasPrice()
+	// g, err := c.client.Eth().GasPrice()
+	g, err := c.clientTmp.GasPrice()
 	c.reportMetricsFromStats("gas_price", time.Since(t))
 	return g, err
 }
@@ -68,7 +70,8 @@ func (c *Client) GetBalance(address string, blockNumber ethgo.BlockNumber) (uint
 
 // BlockNumber returns the current block number.
 func (c *Client) BlockNumber() (uint64, error) {
-	return c.client.Eth().BlockNumber()
+	// return c.client.Eth().BlockNumber()
+	return c.clientTmp.BlockNumber()
 }
 
 // GetBlockByNumber returns the block with the given block number.
