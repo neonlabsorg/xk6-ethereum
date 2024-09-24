@@ -172,13 +172,13 @@ func (c *Client) SendTransaction(tx Transaction) (string, error) {
 // SendRawTransaction signs and sends transaction to the network.
 func (c *Client) SendRawTransaction(tx Transaction) (string, error) {
 	to := ethgo.HexToAddress(tx.To)
-	var gas uint64
+
 	if tx.Gas == 0 {
 		gas, err := c.EstimateGas(tx)
 		if err != nil {
 			return "", err
 		}
-		tx.Gas = gas / 10
+		tx.Gas = gas
 	}
 
 	t := &ethgo.Transaction{
@@ -186,7 +186,7 @@ func (c *Client) SendRawTransaction(tx Transaction) (string, error) {
 		From:     ethgo.HexToAddress(tx.From),
 		To:       &to,
 		Value:    big.NewInt(tx.Value),
-		Gas:      gas,
+		Gas:      tx.Gas,
 		GasPrice: tx.GasPrice,
 		Nonce:    tx.Nonce,
 		Input:    tx.Input,
