@@ -59,33 +59,60 @@ func (c *Client) GasPrice() (uint64, error) {
 	t := time.Now()
 	// g, err := c.client.Eth().GasPrice()
 	g, err := c.clientTmp.GasPrice()
-	c.reportMetricsFromStats("gas_price", time.Since(t))
+	c.reportMetricsFromStats("gasPrice", time.Since(t))
 	return g, err
 }
 
 func (c *Client) GetBalance(address string) (uint64, error) {
+	t := time.Now()
 	blockNumber, err := c.clientTmp.BlockNumber()
 	if err != nil {
 		return 0, err
 	}
+	c.reportMetricsFromStats("getBlockNumber", time.Since(t))
+
+	tb := time.Now()
 	b, err := c.client.Eth().GetBalance(ethgo.HexToAddress(address), ethgo.BlockNumber(blockNumber-3))
+	if err != nil {
+		return 0, err
+	}
+	c.reportMetricsFromStats("getBalance", time.Since(tb))
+
 	return b.Uint64(), err
 }
 
 // BlockNumber returns the current block number.
 func (c *Client) BlockNumber() (uint64, error) {
+	t := time.Now()
 	// return c.client.Eth().BlockNumber()
-	return c.clientTmp.BlockNumber()
+	blockNumber, err := c.clientTmp.BlockNumber()
+	if err != nil {
+		return 0, fmt.Errorf("failed to get block number: %e", err)
+	}
+	c.reportMetricsFromStats("getBlockNumber", time.Since(t))
+	return blockNumber, nil
 }
 
 // GetBlockByNumber returns the block with the given block number.
 func (c *Client) GetBlockByNumber(number ethgo.BlockNumber, full bool) (*ethgo.Block, error) {
-	return c.client.Eth().GetBlockByNumber(number, full)
+	t := time.Now()
+	block, err := c.client.Eth().GetBlockByNumber(number, full)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get block: %e", err)
+	}
+	c.reportMetricsFromStats("getBlockByNumber", time.Since(t))
+	return block, nil
 }
 
 // GetNonce returns the nonce for the given address.
 func (c *Client) GetNonce(address string) (uint64, error) {
-	return c.client.Eth().GetNonce(ethgo.HexToAddress(address), ethgo.Pending)
+	t := time.Now()
+	nonce, err := c.client.Eth().GetNonce(ethgo.HexToAddress(address), ethgo.Pending)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get nonce: %e", err)
+	}
+	c.reportMetricsFromStats("getTransactionCount", time.Since(t))
+	return nonce, nil
 }
 
 // EstimateGas returns the estimated gas for the given transaction.
@@ -101,11 +128,12 @@ func (c *Client) EstimateGas(tx Transaction) (uint64, error) {
 		Gas:      big.NewInt(int64(tx.Gas)),
 	}
 
+	t := time.Now()
 	gas, err := c.client.Eth().EstimateGas(msg)
 	if err != nil {
 		return 0, fmt.Errorf("failed to estimate gas: %e", err)
 	}
-
+	c.reportMetricsFromStats("estimateGas", time.Since(t))
 	return gas, nil
 }
 
@@ -195,12 +223,14 @@ func (c *Client) SendRawTransaction(tx Transaction) (string, error) {
 
 // GetTransactionReceipt returns the transaction receipt for the given transaction hash.
 func (c *Client) GetTransactionReceipt(hash string) (*ethgo.Receipt, error) {
+	t := time.Now()
 	r, err := c.client.Eth().GetTransactionReceipt(ethgo.HexToHash(hash))
 	if err != nil {
 		return nil, err
 	}
 
 	if r != nil {
+		c.reportMetricsFromStats("getTransactionReceipt", time.Since(t))
 		return r, nil
 	}
 
@@ -210,7 +240,6 @@ func (c *Client) GetTransactionReceipt(hash string) (*ethgo.Receipt, error) {
 // WaitForTransactionReceipt waits for the transaction receipt for the given transaction hash.
 func (c *Client) WaitForTransactionReceipt(hash string) *sobek.Promise {
 	promise, resolve, reject := c.makeHandledPromise()
-	now := time.Now()
 
 	go func() {
 		for {
@@ -222,18 +251,6 @@ func (c *Client) WaitForTransactionReceipt(hash string) *sobek.Promise {
 				}
 			}
 			if receipt != nil {
-				// If we are testing vu is nil
-				if c.vu != nil {
-					// Report metrics
-					metrics.PushIfNotDone(c.vu.Context(), c.vu.State().Samples, metrics.Sample{
-						TimeSeries: metrics.TimeSeries{
-							Metric: c.metrics.TimeToMine,
-							Tags:   metrics.NewRegistry().RootTagSet(),
-						},
-						Value: float64(time.Since(now) / time.Millisecond),
-						Time:  time.Now(),
-					})
-				}
 				resolve(receipt)
 				break
 			}
