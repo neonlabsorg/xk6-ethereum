@@ -3,13 +3,13 @@ package ethereum
 
 import (
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"math/big"
 	"strconv"
 	"sync"
 	"time"
 
-	"github.com/grafana/sobek"
 	"github.com/umbracle/ethgo"
 	"github.com/umbracle/ethgo/abi"
 	"github.com/umbracle/ethgo/contract"
@@ -215,9 +215,14 @@ func (c *Client) SendRawTransaction(tx Transaction) (string, error) {
 	}
 
 	h, err := c.client.Eth().SendRawTransaction(trlp)
-	if err != nil {
-		return h.String(), fmt.Errorf("failed to send tx: %e, size of data is %v", err, len(trlp))
+	res, e := json.Marshal(t)
+	if e != nil {
+		return h.String(), fmt.Errorf("failed to marshal tx: %e", err)
 	}
+	if err != nil {
+		return h.String(), fmt.Errorf("failed to send tx: %v, error:  %e", string(res), err)
+	}
+
 	return h.String(), nil
 }
 
@@ -238,27 +243,22 @@ func (c *Client) GetTransactionReceipt(hash string) (*ethgo.Receipt, error) {
 }
 
 // WaitForTransactionReceipt waits for the transaction receipt for the given transaction hash.
-func (c *Client) WaitForTransactionReceipt(hash string) *sobek.Promise {
-	promise, resolve, reject := c.makeHandledPromise()
+func (c *Client) WaitForTransactionReceipt(hash string) *ethgo.Receipt {
+	var res *ethgo.Receipt
+	var err error
 
-	go func() {
-		for {
-			receipt, err := c.GetTransactionReceipt(hash)
-			if err != nil {
-				if err.Error() != "not found" {
-					reject(err)
-					return
-				}
-			}
-			if receipt != nil {
-				resolve(receipt)
-				break
-			}
-			time.Sleep(100 * time.Millisecond)
-		}
-	}()
+	Retry(
+		func() error {
+			res, err = c.GetTransactionReceipt(hash)
+			return err
+		},
+		120, 500*time.Millisecond,
+	)
 
-	return promise
+	if err != nil {
+		return nil
+	}
+	return res
 }
 
 // Accounts returns a list of addresses owned by client. This endpoint is not enabled in infrastructure providers.
@@ -338,29 +338,6 @@ func (c *Client) DeployContract(abistr string, bytecode string, args ...interfac
 	}
 
 	return receipt, nil
-}
-
-// makeHandledPromise will create a promise and return its resolve and reject methods,
-// wrapped in such a way that it will block the eventloop from exiting before they are
-// called even if the promise isn't resolved by the time the current script ends executing.
-func (c *Client) makeHandledPromise() (*sobek.Promise, func(interface{}), func(interface{})) {
-	runtime := c.vu.Runtime()
-	callback := c.vu.RegisterCallback()
-	p, resolve, reject := runtime.NewPromise()
-
-	return p, func(i interface{}) {
-			// more stuff
-			callback(func() error {
-				resolve(i)
-				return nil
-			})
-		}, func(i interface{}) {
-			// more stuff
-			callback(func() error {
-				reject(i)
-				return nil
-			})
-		}
 }
 
 var blocks sync.Map
