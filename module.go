@@ -75,7 +75,7 @@ func (mi *ModuleInstance) NewClient(call sobek.ConstructorCall) *sobek.Object {
 	}
 
 	if opts.URL == "" {
-		opts.URL = "http://localhost:8545"
+		opts.URL = "http://localhost:9090/solana"
 	}
 
 	if opts.PrivateKey == "" {

@@ -34,13 +34,13 @@ type Transaction struct {
 }
 
 type Client struct {
-	w       *wallet.Key
-	client *jsonrpc.Client
-	clientTmp  *ClientTmp
-	chainID *big.Int
-	vu      modules.VU
-	metrics ethMetrics
-	opts    *options
+	w         *wallet.Key
+	client    *jsonrpc.Client
+	clientTmp *ClientTmp
+	chainID   *big.Int
+	vu        modules.VU
+	metrics   ethMetrics
+	opts      *options
 }
 
 func (c *Client) Exports() modules.Exports {
@@ -63,8 +63,12 @@ func (c *Client) GasPrice() (uint64, error) {
 	return g, err
 }
 
-func (c *Client) GetBalance(address string, blockNumber ethgo.BlockNumber) (uint64, error) {
-	b, err := c.client.Eth().GetBalance(ethgo.HexToAddress(address), blockNumber)
+func (c *Client) GetBalance(address string) (uint64, error) {
+	blockNumber, err := c.clientTmp.BlockNumber()
+	if err != nil {
+		return 0, err
+	}
+	b, err := c.client.Eth().GetBalance(ethgo.HexToAddress(address), ethgo.BlockNumber(blockNumber-3))
 	return b.Uint64(), err
 }
 
@@ -92,8 +96,9 @@ func (c *Client) EstimateGas(tx Transaction) (uint64, error) {
 		From:     ethgo.HexToAddress(tx.From),
 		To:       &to,
 		Value:    big.NewInt(tx.Value),
-		Data:     tx.Input,
+		Data:     []byte(tx.Input),
 		GasPrice: tx.GasPrice,
+		Gas:      big.NewInt(int64(tx.Gas)),
 	}
 
 	gas, err := c.client.Eth().EstimateGas(msg)
@@ -139,10 +144,13 @@ func (c *Client) SendTransaction(tx Transaction) (string, error) {
 // SendRawTransaction signs and sends transaction to the network.
 func (c *Client) SendRawTransaction(tx Transaction) (string, error) {
 	to := ethgo.HexToAddress(tx.To)
-
-	gas, err := c.EstimateGas(tx)
-	if err != nil {
-		return "", err
+	var gas uint64
+	if tx.Gas == 0 {
+		gas, err := c.EstimateGas(tx)
+		if err != nil {
+			return "", err
+		}
+		tx.Gas = gas / 10
 	}
 
 	t := &ethgo.Transaction{
@@ -158,10 +166,13 @@ func (c *Client) SendRawTransaction(tx Transaction) (string, error) {
 	}
 
 	if tx.GasFeeCap > 0 || tx.GasTipCap > 0 {
+		if tx.GasPrice < tx.GasFeeCap {
+			return "", fmt.Errorf("gas price is less than gas fee cap")
+		}
 		t.Type = ethgo.TransactionDynamicFee
+		t.MaxFeePerGas = big.NewInt(0).SetUint64(t.GasPrice)
+		t.MaxPriorityFeePerGas = big.NewInt(0).SetUint64(t.GasPrice - tx.GasFeeCap)
 		t.GasPrice = 0
-		t.MaxFeePerGas = big.NewInt(0).SetUint64(tx.GasFeeCap)
-		t.MaxPriorityFeePerGas = big.NewInt(0).SetUint64(tx.GasTipCap)
 	}
 
 	s := wallet.NewEIP155Signer(t.ChainID.Uint64())
@@ -176,7 +187,10 @@ func (c *Client) SendRawTransaction(tx Transaction) (string, error) {
 	}
 
 	h, err := c.client.Eth().SendRawTransaction(trlp)
-	return h.String(), err
+	if err != nil {
+		return h.String(), fmt.Errorf("failed to send tx: %e, size of data is %v", err, len(trlp))
+	}
+	return h.String(), nil
 }
 
 // GetTransactionReceipt returns the transaction receipt for the given transaction hash.

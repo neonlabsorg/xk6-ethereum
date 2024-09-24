@@ -40,7 +40,11 @@ func parseResponse(methodName string, response *jsonrpc.RPCResponse) (uint64, er
 		return 0, fmt.Errorf("failed to parse hex value to uint64 %s", methodName)
 	}
 
-	result, err := strconv.ParseUint(strings.Trim(value, "0x"), 16, 64)
+	s, ok := strings.CutPrefix(value, "0x")
+	if !ok {
+		return 0, fmt.Errorf("failed to cut prefix value %s", s)
+	}
+	result, err := strconv.ParseUint(s, 16, 64)
 	if err != nil {
 		fmt.Printf("failed to convert string value into uint64: %s", methodName)
 		return 0, fmt.Errorf("error message: %w", err)
