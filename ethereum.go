@@ -51,6 +51,10 @@ func (c *Client) Call(method string, params ...interface{}) (interface{}, error)
 	t := time.Now()
 	var out interface{}
 	err := c.client.Call(method, &out, params...)
+	if err != nil {
+		c.reportErrorMetrics(method)
+		return out, err
+	}
 	c.reportMetricsFromStats(method, time.Since(t))
 	return out, err
 }
@@ -59,6 +63,10 @@ func (c *Client) GasPrice() (uint64, error) {
 	t := time.Now()
 	// g, err := c.client.Eth().GasPrice()
 	g, err := c.clientTmp.GasPrice()
+	if err != nil {
+		c.reportErrorMetrics("gasPrice")
+		return g, err
+	}
 	c.reportMetricsFromStats("gasPrice", time.Since(t))
 	return g, err
 }
@@ -67,6 +75,7 @@ func (c *Client) GetBalance(address string) (uint64, error) {
 	t := time.Now()
 	blockNumber, err := c.clientTmp.BlockNumber()
 	if err != nil {
+		c.reportErrorMetrics("gasPrice")
 		return 0, err
 	}
 	c.reportMetricsFromStats("getBlockNumber", time.Since(t))
@@ -74,6 +83,7 @@ func (c *Client) GetBalance(address string) (uint64, error) {
 	tb := time.Now()
 	b, err := c.client.Eth().GetBalance(ethgo.HexToAddress(address), ethgo.BlockNumber(blockNumber-3))
 	if err != nil {
+		c.reportErrorMetrics("getBalance")
 		return 0, err
 	}
 	c.reportMetricsFromStats("getBalance", time.Since(tb))
@@ -87,6 +97,7 @@ func (c *Client) BlockNumber() (uint64, error) {
 	// return c.client.Eth().BlockNumber()
 	blockNumber, err := c.clientTmp.BlockNumber()
 	if err != nil {
+		c.reportErrorMetrics("getBlockNumber")
 		return 0, fmt.Errorf("failed to get block number: %e", err)
 	}
 	c.reportMetricsFromStats("getBlockNumber", time.Since(t))
@@ -98,6 +109,7 @@ func (c *Client) GetBlockByNumber(number ethgo.BlockNumber, full bool) (*ethgo.B
 	t := time.Now()
 	block, err := c.client.Eth().GetBlockByNumber(number, full)
 	if err != nil {
+		c.reportErrorMetrics("getBlockByNumber")
 		return nil, fmt.Errorf("failed to get block: %e", err)
 	}
 	c.reportMetricsFromStats("getBlockByNumber", time.Since(t))
@@ -109,6 +121,7 @@ func (c *Client) GetNonce(address string) (uint64, error) {
 	t := time.Now()
 	nonce, err := c.client.Eth().GetNonce(ethgo.HexToAddress(address), ethgo.Pending)
 	if err != nil {
+		c.reportErrorMetrics("getTransactionCount")
 		return 0, fmt.Errorf("failed to get nonce: %e", err)
 	}
 	c.reportMetricsFromStats("getTransactionCount", time.Since(t))
@@ -131,6 +144,7 @@ func (c *Client) EstimateGas(tx Transaction) (uint64, error) {
 	t := time.Now()
 	gas, err := c.client.Eth().EstimateGas(msg)
 	if err != nil {
+		c.reportErrorMetrics("estimateGas")
 		return 0, fmt.Errorf("failed to estimate gas: %e", err)
 	}
 	c.reportMetricsFromStats("estimateGas", time.Since(t))
@@ -214,14 +228,17 @@ func (c *Client) SendRawTransaction(tx Transaction) (string, error) {
 		return "", fmt.Errorf("failed to marshal tx: %e", err)
 	}
 
+	timeNow := time.Now()
 	h, err := c.client.Eth().SendRawTransaction(trlp)
 	res, e := json.Marshal(t)
 	if e != nil {
 		return h.String(), fmt.Errorf("failed to marshal tx: %e", err)
 	}
 	if err != nil {
+		c.reportErrorMetrics("sendRawTransaction")
 		return h.String(), fmt.Errorf("failed to send tx: %v, error:  %e", string(res), err)
 	}
+	c.reportMetricsFromStats("sendRawTransaction", time.Since(timeNow))
 
 	return h.String(), nil
 }
@@ -256,6 +273,7 @@ func (c *Client) WaitForTransactionReceipt(hash string) *ethgo.Receipt {
 	)
 
 	if err != nil {
+		c.reportErrorMetrics("getTransactionReceipt")
 		return nil
 	}
 	return res
