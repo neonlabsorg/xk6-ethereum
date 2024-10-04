@@ -3,13 +3,13 @@ package ethereum
 
 import (
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"math/big"
 	"strconv"
 	"sync"
 	"time"
 
-	"github.com/grafana/sobek"
 	"github.com/umbracle/ethgo"
 	"github.com/umbracle/ethgo/abi"
 	"github.com/umbracle/ethgo/contract"
@@ -34,12 +34,13 @@ type Transaction struct {
 }
 
 type Client struct {
-	w       *wallet.Key
-	client  *jsonrpc.Client
-	chainID *big.Int
-	vu      modules.VU
-	metrics ethMetrics
-	opts    *options
+	w         *wallet.Key
+	client    *jsonrpc.Client
+	clientTmp *ClientTmp
+	chainID   *big.Int
+	vu        modules.VU
+	metrics   ethMetrics
+	opts      *options
 }
 
 func (c *Client) Exports() modules.Exports {
@@ -56,29 +57,62 @@ func (c *Client) Call(method string, params ...interface{}) (interface{}, error)
 
 func (c *Client) GasPrice() (uint64, error) {
 	t := time.Now()
-	g, err := c.client.Eth().GasPrice()
-	c.reportMetricsFromStats("gas_price", time.Since(t))
+	// g, err := c.client.Eth().GasPrice()
+	g, err := c.clientTmp.GasPrice()
+	c.reportMetricsFromStats("gasPrice", time.Since(t))
 	return g, err
 }
 
-func (c *Client) GetBalance(address string, blockNumber ethgo.BlockNumber) (uint64, error) {
-	b, err := c.client.Eth().GetBalance(ethgo.HexToAddress(address), blockNumber)
+func (c *Client) GetBalance(address string) (uint64, error) {
+	t := time.Now()
+	blockNumber, err := c.clientTmp.BlockNumber()
+	if err != nil {
+		return 0, err
+	}
+	c.reportMetricsFromStats("getBlockNumber", time.Since(t))
+
+	tb := time.Now()
+	b, err := c.client.Eth().GetBalance(ethgo.HexToAddress(address), ethgo.BlockNumber(blockNumber-3))
+	if err != nil {
+		return 0, err
+	}
+	c.reportMetricsFromStats("getBalance", time.Since(tb))
+
 	return b.Uint64(), err
 }
 
 // BlockNumber returns the current block number.
 func (c *Client) BlockNumber() (uint64, error) {
-	return c.client.Eth().BlockNumber()
+	t := time.Now()
+	// return c.client.Eth().BlockNumber()
+	blockNumber, err := c.clientTmp.BlockNumber()
+	if err != nil {
+		return 0, fmt.Errorf("failed to get block number: %e", err)
+	}
+	c.reportMetricsFromStats("getBlockNumber", time.Since(t))
+	return blockNumber, nil
 }
 
 // GetBlockByNumber returns the block with the given block number.
 func (c *Client) GetBlockByNumber(number ethgo.BlockNumber, full bool) (*ethgo.Block, error) {
-	return c.client.Eth().GetBlockByNumber(number, full)
+	t := time.Now()
+	block, err := c.client.Eth().GetBlockByNumber(number, full)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get block: %e", err)
+	}
+	c.reportMetricsFromStats("getBlockByNumber", time.Since(t))
+	return block, nil
 }
 
 // GetNonce returns the nonce for the given address.
 func (c *Client) GetNonce(address string) (uint64, error) {
-	return c.client.Eth().GetNonce(ethgo.HexToAddress(address), ethgo.Pending)
+	t := time.Now()
+	nonce, err := c.client.Eth().GetNonce(ethgo.HexToAddress(address), ethgo.Pending)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get nonce: %e", err)
+	}
+	c.reportMetricsFromStats("getTransactionCount", time.Since(t))
+	return nonce, nil
 }
 
 // EstimateGas returns the estimated gas for the given transaction.
@@ -89,15 +123,17 @@ func (c *Client) EstimateGas(tx Transaction) (uint64, error) {
 		From:     ethgo.HexToAddress(tx.From),
 		To:       &to,
 		Value:    big.NewInt(tx.Value),
-		Data:     tx.Input,
+		Data:     []byte(tx.Input),
 		GasPrice: tx.GasPrice,
+		Gas:      big.NewInt(int64(tx.Gas)),
 	}
 
+	t := time.Now()
 	gas, err := c.client.Eth().EstimateGas(msg)
 	if err != nil {
 		return 0, fmt.Errorf("failed to estimate gas: %e", err)
 	}
-
+	c.reportMetricsFromStats("estimateGas", time.Since(t))
 	return gas, nil
 }
 
@@ -137,9 +173,12 @@ func (c *Client) SendTransaction(tx Transaction) (string, error) {
 func (c *Client) SendRawTransaction(tx Transaction) (string, error) {
 	to := ethgo.HexToAddress(tx.To)
 
-	gas, err := c.EstimateGas(tx)
-	if err != nil {
-		return "", err
+	if tx.Gas == 0 {
+		gas, err := c.EstimateGas(tx)
+		if err != nil {
+			return "", err
+		}
+		tx.Gas = gas
 	}
 
 	t := &ethgo.Transaction{
@@ -147,7 +186,7 @@ func (c *Client) SendRawTransaction(tx Transaction) (string, error) {
 		From:     ethgo.HexToAddress(tx.From),
 		To:       &to,
 		Value:    big.NewInt(tx.Value),
-		Gas:      gas,
+		Gas:      tx.Gas,
 		GasPrice: tx.GasPrice,
 		Nonce:    tx.Nonce,
 		Input:    tx.Input,
@@ -155,10 +194,13 @@ func (c *Client) SendRawTransaction(tx Transaction) (string, error) {
 	}
 
 	if tx.GasFeeCap > 0 || tx.GasTipCap > 0 {
+		if tx.GasPrice < tx.GasFeeCap {
+			return "", fmt.Errorf("gas price is less than gas fee cap")
+		}
 		t.Type = ethgo.TransactionDynamicFee
+		t.MaxFeePerGas = big.NewInt(0).SetUint64(t.GasPrice)
+		t.MaxPriorityFeePerGas = big.NewInt(0).SetUint64(t.GasPrice - tx.GasFeeCap)
 		t.GasPrice = 0
-		t.MaxFeePerGas = big.NewInt(0).SetUint64(tx.GasFeeCap)
-		t.MaxPriorityFeePerGas = big.NewInt(0).SetUint64(tx.GasTipCap)
 	}
 
 	s := wallet.NewEIP155Signer(t.ChainID.Uint64())
@@ -173,17 +215,27 @@ func (c *Client) SendRawTransaction(tx Transaction) (string, error) {
 	}
 
 	h, err := c.client.Eth().SendRawTransaction(trlp)
-	return h.String(), err
+	res, e := json.Marshal(t)
+	if e != nil {
+		return h.String(), fmt.Errorf("failed to marshal tx: %e", err)
+	}
+	if err != nil {
+		return h.String(), fmt.Errorf("failed to send tx: %v, error:  %e", string(res), err)
+	}
+
+	return h.String(), nil
 }
 
 // GetTransactionReceipt returns the transaction receipt for the given transaction hash.
 func (c *Client) GetTransactionReceipt(hash string) (*ethgo.Receipt, error) {
+	t := time.Now()
 	r, err := c.client.Eth().GetTransactionReceipt(ethgo.HexToHash(hash))
 	if err != nil {
 		return nil, err
 	}
 
 	if r != nil {
+		c.reportMetricsFromStats("getTransactionReceipt", time.Since(t))
 		return r, nil
 	}
 
@@ -191,40 +243,22 @@ func (c *Client) GetTransactionReceipt(hash string) (*ethgo.Receipt, error) {
 }
 
 // WaitForTransactionReceipt waits for the transaction receipt for the given transaction hash.
-func (c *Client) WaitForTransactionReceipt(hash string) *sobek.Promise {
-	promise, resolve, reject := c.makeHandledPromise()
-	now := time.Now()
+func (c *Client) WaitForTransactionReceipt(hash string) *ethgo.Receipt {
+	var res *ethgo.Receipt
+	var err error
 
-	go func() {
-		for {
-			receipt, err := c.GetTransactionReceipt(hash)
-			if err != nil {
-				if err.Error() != "not found" {
-					reject(err)
-					return
-				}
-			}
-			if receipt != nil {
-				// If we are testing vu is nil
-				if c.vu != nil {
-					// Report metrics
-					metrics.PushIfNotDone(c.vu.Context(), c.vu.State().Samples, metrics.Sample{
-						TimeSeries: metrics.TimeSeries{
-							Metric: c.metrics.TimeToMine,
-							Tags:   metrics.NewRegistry().RootTagSet(),
-						},
-						Value: float64(time.Since(now) / time.Millisecond),
-						Time:  time.Now(),
-					})
-				}
-				resolve(receipt)
-				break
-			}
-			time.Sleep(100 * time.Millisecond)
-		}
-	}()
+	Retry(
+		func() error {
+			res, err = c.GetTransactionReceipt(hash)
+			return err
+		},
+		120, 500*time.Millisecond,
+	)
 
-	return promise
+	if err != nil {
+		return nil
+	}
+	return res
 }
 
 // Accounts returns a list of addresses owned by client. This endpoint is not enabled in infrastructure providers.
@@ -304,29 +338,6 @@ func (c *Client) DeployContract(abistr string, bytecode string, args ...interfac
 	}
 
 	return receipt, nil
-}
-
-// makeHandledPromise will create a promise and return its resolve and reject methods,
-// wrapped in such a way that it will block the eventloop from exiting before they are
-// called even if the promise isn't resolved by the time the current script ends executing.
-func (c *Client) makeHandledPromise() (*sobek.Promise, func(interface{}), func(interface{})) {
-	runtime := c.vu.Runtime()
-	callback := c.vu.RegisterCallback()
-	p, resolve, reject := runtime.NewPromise()
-
-	return p, func(i interface{}) {
-			// more stuff
-			callback(func() error {
-				resolve(i)
-				return nil
-			})
-		}, func(i interface{}) {
-			// more stuff
-			callback(func() error {
-				reject(i)
-				return nil
-			})
-		}
 }
 
 var blocks sync.Map

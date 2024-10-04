@@ -1,6 +1,8 @@
 module github.com/neonlabsorg/xk6-ethereum
 
-go 1.20
+go 1.21
+
+toolchain go1.21.4
 
 require (
 	github.com/grafana/sobek v0.0.0-20240607083612-4f0cd64f4e78
@@ -44,6 +46,7 @@ require (
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	github.com/valyala/fasthttp v1.4.0 // indirect
 	github.com/valyala/fastjson v1.4.1 // indirect
+	github.com/ybbus/jsonrpc/v3 v3.1.5 // indirect
 	go.opentelemetry.io/otel v1.24.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.24.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.24.0 // indirect

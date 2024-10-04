@@ -5,14 +5,16 @@ import (
 	"bytes"
 	"encoding/hex"
 	"encoding/json"
-	"math/big"
 	"errors"
 	"fmt"
+	"math/big"
 	"time"
+	"context"
 
 	"github.com/grafana/sobek"
 	"github.com/umbracle/ethgo/jsonrpc"
 	"github.com/umbracle/ethgo/wallet"
+	jsonrpcTmp "github.com/ybbus/jsonrpc/v3"
 	"go.k6.io/k6/js/common"
 	"go.k6.io/k6/js/modules"
 	"go.k6.io/k6/metrics"
@@ -73,7 +75,7 @@ func (mi *ModuleInstance) NewClient(call sobek.ConstructorCall) *sobek.Object {
 	}
 
 	if opts.URL == "" {
-		opts.URL = "http://localhost:8545"
+		opts.URL = "http://localhost:9090/solana"
 	}
 
 	if opts.PrivateKey == "" {
@@ -84,43 +86,49 @@ func (mi *ModuleInstance) NewClient(call sobek.ConstructorCall) *sobek.Object {
 	if opts.Mnemonic != "" {
 		w, err := wallet.NewWalletFromMnemonic(opts.Mnemonic)
 		if err != nil {
-			common.Throw(rt, fmt.Errorf("Can't get a new wallet from given mnemonic; reason: %w", err))
+			common.Throw(rt, fmt.Errorf("can't get a new wallet from given mnemonic; reason: %w", err))
 		}
 		wa = w
 	} else if opts.PrivateKey != "" {
 		pk, err := hex.DecodeString(opts.PrivateKey)
 		if err != nil {
-			common.Throw(rt, fmt.Errorf("Can't decode private key; reason: %w", err))
+			common.Throw(rt, fmt.Errorf("can't decode private key; reason: %w", err))
 		}
 		w, err := wallet.NewWalletFromPrivKey(pk)
 		if err != nil {
-			common.Throw(rt, fmt.Errorf("Can't get a new wallet from given private key; reason: %w", err))
+			common.Throw(rt, fmt.Errorf("can't get a new wallet from given private key; reason: %w", err))
 		}
 		wa = w
 	}
 
 	c, err := jsonrpc.NewClient(opts.URL)
 	if err != nil {
-		common.Throw(rt, fmt.Errorf("Can't create a new rpc client; reason: %w", err))
-	}
-	
-	var cid *big.Int
-	if opts.ChainId == nil {
-		cid, err = c.Eth().ChainID()
-		if err != nil {
-			common.Throw(rt, fmt.Errorf("Can't get a chain id; reason: %w", err))
-		}
-	} else {
-		cid = opts.ChainId
+		common.Throw(rt, fmt.Errorf("can't create a new rpc client; reason: %w", err))
 	}
 
+	cTmp := &ClientTmp{
+		client: jsonrpcTmp.NewClient(opts.URL), 
+		ctx: context.Background(),
+	}
+
+	// var cid *big.Int
+	// if opts.ChainId == nil {
+	// 	cid, err = c.Eth().ChainID()
+	// 	if err != nil {
+	// 		common.Throw(rt, fmt.Errorf("Can't get a chain id; reason: %w", err))
+	// 	}
+	// } else {
+	cid := opts.ChainId
+	// }
+
 	client := &Client{
-		vu:      mi.vu,
-		metrics: mi.m,
-		client:  c,
-		w:       wa,
-		chainID: cid,
-		opts:    opts,
+		vu:        mi.vu,
+		metrics:   mi.m,
+		client:    c,
+		clientTmp: cTmp,
+		w:         wa,
+		chainID:   cid,
+		opts:      opts,
 	}
 
 	// go client.pollForBlocks()
@@ -156,9 +164,9 @@ func (c *Client) reportMetricsFromStats(call string, t time.Duration) {
 
 // options defines configuration options for the client.
 type options struct {
-	URL        string `json:"url,omitempty"`
-	Mnemonic   string `json:"mnemonic,omitempty"`
-	PrivateKey string `json:"privateKey,omitempty"`
+	URL        string   `json:"url,omitempty"`
+	Mnemonic   string   `json:"mnemonic,omitempty"`
+	PrivateKey string   `json:"privateKey,omitempty"`
 	ChainId    *big.Int `json:"chainId,omitempty"`
 }
 
