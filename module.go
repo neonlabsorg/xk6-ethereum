@@ -3,13 +3,13 @@ package ethereum
 
 import (
 	"bytes"
+	"context"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
 	"time"
-	"context"
 
 	"github.com/grafana/sobek"
 	"github.com/umbracle/ethgo/jsonrpc"
@@ -31,6 +31,7 @@ type ethMetrics struct {
 	GasUsed         *metrics.Metric
 	TPS             *metrics.Metric
 	BlockTime       *metrics.Metric
+	RequestError    *metrics.Metric
 }
 
 func init() {
@@ -107,8 +108,8 @@ func (mi *ModuleInstance) NewClient(call sobek.ConstructorCall) *sobek.Object {
 	}
 
 	cTmp := &ClientTmp{
-		client: jsonrpcTmp.NewClient(opts.URL), 
-		ctx: context.Background(),
+		client: jsonrpcTmp.NewClient(opts.URL),
+		ctx:    context.Background(),
 	}
 
 	// var cid *big.Int
@@ -142,6 +143,7 @@ func registerMetrics(vu modules.VU) ethMetrics {
 		RequestDuration: registry.MustNewMetric("ethereum_req_duration", metrics.Trend, metrics.Time),
 		TimeToMine:      registry.MustNewMetric("ethereum_time_to_mine", metrics.Trend, metrics.Time),
 		Block:           registry.MustNewMetric("ethereum_block", metrics.Counter, metrics.Default),
+		RequestError:    registry.MustNewMetric("ethereum_req_error", metrics.Counter, metrics.Default),
 		GasUsed:         registry.MustNewMetric("ethereum_gas_used", metrics.Trend, metrics.Default),
 		TPS:             registry.MustNewMetric("ethereum_tps", metrics.Trend, metrics.Default),
 		BlockTime:       registry.MustNewMetric("ethereum_block_time", metrics.Trend, metrics.Time),
@@ -158,6 +160,18 @@ func (c *Client) reportMetricsFromStats(call string, t time.Duration) {
 			Tags:   registry.RootTagSet().With("call", call),
 		},
 		Value: float64(t / time.Millisecond),
+		Time:  time.Now(),
+	})
+}
+
+func (c *Client) reportErrorMetrics(call string) {
+	registry := metrics.NewRegistry()
+	metrics.PushIfNotDone(c.vu.Context(), c.vu.State().Samples, metrics.Sample{
+		TimeSeries: metrics.TimeSeries{
+			Metric: c.metrics.RequestError,
+			Tags:   registry.RootTagSet().With("call", call),
+		},
+		Value: 1,
 		Time:  time.Now(),
 	})
 }
