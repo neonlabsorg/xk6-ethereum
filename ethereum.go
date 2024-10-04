@@ -214,6 +214,7 @@ func (c *Client) SendRawTransaction(tx Transaction) (string, error) {
 		return "", fmt.Errorf("failed to marshal tx: %e", err)
 	}
 
+	timeNow := time.Now()
 	h, err := c.client.Eth().SendRawTransaction(trlp)
 	res, e := json.Marshal(t)
 	if e != nil {
@@ -222,6 +223,7 @@ func (c *Client) SendRawTransaction(tx Transaction) (string, error) {
 	if err != nil {
 		return h.String(), fmt.Errorf("failed to send tx: %v, error:  %e", string(res), err)
 	}
+	c.reportMetricsFromStats("sendRawTransaction", time.Since(timeNow))
 
 	return h.String(), nil
 }
