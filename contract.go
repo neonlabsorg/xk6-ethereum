@@ -10,8 +10,9 @@ import (
 
 // Contract exposes a contract
 type Contract struct {
-	*contract.Contract
-	client *Client
+	Contract      *contract.Contract
+	Client        *Client
+	SignerAddress string
 }
 
 type TxnOpts struct {
@@ -44,8 +45,12 @@ func (c *Contract) Txn(method string, opts TxnOpts, args ...interface{}) (string
 
 	err = txn.Do()
 	if err != nil {
-		return "", fmt.Errorf("failed to send contract transaction: %w", err)
+		return "", fmt.Errorf("failed to send contract transaction: %w, Tx: %+v", err, txo)
 	}
 
 	return txn.Hash().String(), nil
+}
+
+func (c *Contract) GetAddress() string {
+	return c.SignerAddress
 }

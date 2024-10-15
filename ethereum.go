@@ -12,7 +12,7 @@ import (
 
 	"github.com/umbracle/ethgo"
 	"github.com/umbracle/ethgo/abi"
-	"github.com/umbracle/ethgo/contract"
+	contract "github.com/umbracle/ethgo/contract"
 	"github.com/umbracle/ethgo/jsonrpc"
 	"github.com/umbracle/ethgo/wallet"
 	"go.k6.io/k6/js/modules"
@@ -295,25 +295,28 @@ func (c *Client) Accounts() ([]string, error) {
 }
 
 // NewContract creates a new contract instance with the given ABI.
-func (c *Client) NewContract(address string, abistr string) (*Contract, error) {
+func (c *Client) NewContract(address string, abistr string, signerKey string) (*Contract, error) {
 	contractABI, err := abi.NewABI(abistr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse abi: %w", err)
 	}
 
+	wallet, err := wallet.NewWalletFromPrivKey([]byte(signerKey))
+	if err != nil {
+		return nil, fmt.Errorf("failed to get wallet from private key: %w", err)
+	}
+
 	opts := []contract.ContractOption{
 		contract.WithJsonRPC(c.client.Eth()),
-		contract.WithSender(c.w),
+		contract.WithSender(wallet),
 	}
 
 	contract := contract.NewContract(ethgo.HexToAddress(address), contractABI, opts...)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create contract: %w", err)
-	}
 
 	return &Contract{
 		Contract: contract,
-		client:   c,
+		Client:   c,
+		SignerAddress: wallet.Address().String(),
 	}, nil
 }
 
@@ -339,15 +342,25 @@ func (c *Client) DeployContract(abistr string, bytecode string, args ...interfac
 	// Deploy contract
 	txn, err := contract.DeployContract(contractABI, contractBytecode, args, opts...)
 	if err != nil {
-		return nil, fmt.Errorf("failed to deploy contract: %w", err)
+		return nil, fmt.Errorf("failed to deploy contract: %w, args: %s", err, args)
 	}
+
+	blockNumber, err := c.BlockNumber()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get block number: %w", err)
+	}
+	block, err := c.GetBlockByNumber(ethgo.BlockNumber(blockNumber), false)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get block: %w", err)
+	}
+
 	txn.WithOpts(&contract.TxnOpts{
-		GasLimit: 1500000,
+		GasLimit: block.GasLimit,
 	})
 
 	err = txn.Do()
 	if err != nil {
-		return nil, fmt.Errorf("failed to deploy contract: %w", err)
+		return nil, fmt.Errorf("failed to deploy contract txn.Do() stage: %w", err)
 	}
 
 	receipt, err := txn.Wait()
