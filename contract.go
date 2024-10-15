@@ -35,10 +35,23 @@ func (c *Contract) Txn(method string, opts TxnOpts, args ...interface{}) (string
 		return "", fmt.Errorf("failed to create contract transaction: %w", err)
 	}
 
+	gasPrice, err := c.Client.GasPrice()
+	if err != nil {
+		return "", fmt.Errorf("failed to get gas price: %w", err)
+	}
+	blockNumber, err := c.Client.BlockNumber()
+	if err != nil {
+		return "", fmt.Errorf("failed to get block number: %w", err)
+	}
+	block, err := c.Client.GetBlockByNumber(ethgo.BlockNumber(blockNumber), false)
+	if err != nil {
+		return "", fmt.Errorf("failed to get block: %w", err)
+	}
+
 	txo := contract.TxnOpts{
 		Value:    big.NewInt(int64(opts.Value)),
-		GasPrice: opts.GasPrice,
-		GasLimit: opts.GasLimit,
+		GasPrice: gasPrice,
+		GasLimit: block.GasLimit,
 		Nonce:    opts.Nonce,
 	}
 	txn.WithOpts(&txo)
