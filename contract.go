@@ -5,6 +5,7 @@ import (
 	"math/big"
 
 	"github.com/umbracle/ethgo"
+	"github.com/umbracle/ethgo/abi"
 	"github.com/umbracle/ethgo/contract"
 )
 
@@ -66,4 +67,15 @@ func (c *Contract) Txn(method string, opts TxnOpts, args ...interface{}) (string
 
 func (c *Contract) GetAddress() string {
 	return c.SignerAddress
+}
+
+func (c *Contract) FillInput(abiString string, method string) []byte {
+	contractABI, err := abi.NewABI(abiString)
+	if err != nil {
+		fmt.Printf("failed to parse abi: %s", err)
+		return nil
+	}
+	methodContract := contractABI.GetMethod(method)
+
+	return methodContract.ID()
 }

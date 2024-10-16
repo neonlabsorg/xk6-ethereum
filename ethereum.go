@@ -314,8 +314,8 @@ func (c *Client) NewContract(address string, abistr string, signerKey string) (*
 	contract := contract.NewContract(ethgo.HexToAddress(address), contractABI, opts...)
 
 	return &Contract{
-		Contract: contract,
-		Client:   c,
+		Contract:      contract,
+		Client:        c,
 		SignerAddress: wallet.Address().String(),
 	}, nil
 }
