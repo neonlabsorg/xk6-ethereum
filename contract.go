@@ -69,13 +69,20 @@ func (c *Contract) GetAddress() string {
 	return c.SignerAddress
 }
 
-func (c *Contract) FillInput(abiString string, method string) []byte {
+func (c *Contract) FillInput(abiString string, method string, args ...interface{}) ([]byte, error) {
+	var input []byte
 	contractABI, err := abi.NewABI(abiString)
 	if err != nil {
-		fmt.Printf("failed to parse abi: %s", err)
-		return nil
+		return nil, fmt.Errorf("failed to parse abi: %v", err)
 	}
-	methodContract := contractABI.GetMethod(method)
 
-	return methodContract.ID()
+	abiMethod := contractABI.GetMethod(method)
+	data, err := abi.Encode(args, abiMethod.Inputs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode arguments: %v", err)
+	}
+
+	input = append(abiMethod.ID(), data...)
+
+	return input, nil
 }

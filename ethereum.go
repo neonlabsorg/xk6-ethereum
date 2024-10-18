@@ -187,12 +187,19 @@ func (c *Client) SendTransaction(tx Transaction) (string, error) {
 func (c *Client) SendRawTransaction(tx Transaction) (string, error) {
 	to := ethgo.HexToAddress(tx.To)
 
-	if tx.Gas == 0 {
-		gas, err := c.EstimateGas(tx)
-		if err != nil {
-			return "", err
-		}
-		tx.Gas = gas
+	gasPrice, err := c.GasPrice()
+	if err != nil {
+		return "", fmt.Errorf("failed to get gas price: %e", err)
+	}
+
+	gas, err := c.EstimateGas(tx)
+	if err != nil {
+		return "", fmt.Errorf("failed to estimate gas: %e", err)
+	}
+
+	nonce, err := c.GetNonce(tx.From)
+	if err != nil {
+		return "", fmt.Errorf("failed to get nonce: %e", err)
 	}
 
 	t := &ethgo.Transaction{
@@ -200,10 +207,10 @@ func (c *Client) SendRawTransaction(tx Transaction) (string, error) {
 		From:     ethgo.HexToAddress(tx.From),
 		To:       &to,
 		Value:    big.NewInt(tx.Value),
-		Gas:      tx.Gas,
-		GasPrice: tx.GasPrice,
-		Nonce:    tx.Nonce,
-		Input:    tx.Input,
+		Gas:      gas,
+		GasPrice: gasPrice,
+		Nonce:    nonce,
+		Input:    []byte(tx.Input),
 		ChainID:  c.chainID,
 	}
 
@@ -260,7 +267,7 @@ func (c *Client) GetTransactionReceipt(hash string) (*ethgo.Receipt, error) {
 }
 
 // WaitForTransactionReceipt waits for the transaction receipt for the given transaction hash.
-func (c *Client) WaitForTransactionReceipt(hash string) *ethgo.Receipt {
+func (c *Client) WaitForTransactionReceipt(hash string, maxAttempts int) *ethgo.Receipt {
 	var res *ethgo.Receipt
 	var err error
 
@@ -269,7 +276,7 @@ func (c *Client) WaitForTransactionReceipt(hash string) *ethgo.Receipt {
 			res, err = c.GetTransactionReceipt(hash)
 			return err
 		},
-		120, 500*time.Millisecond,
+		maxAttempts, 500*time.Millisecond,
 	)
 
 	if err != nil {

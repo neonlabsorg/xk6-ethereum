@@ -67,7 +67,7 @@ func Test_SendRawTransaction(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	prom := client.WaitForTransactionReceipt(tx)
+	prom := client.WaitForTransactionReceipt(tx, 120)
 	t.Log(prom)
 }
 
