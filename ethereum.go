@@ -12,7 +12,7 @@ import (
 
 	"github.com/umbracle/ethgo"
 	"github.com/umbracle/ethgo/abi"
-	"github.com/umbracle/ethgo/contract"
+	contract "github.com/umbracle/ethgo/contract"
 	"github.com/umbracle/ethgo/jsonrpc"
 	"github.com/umbracle/ethgo/wallet"
 	"go.k6.io/k6/js/modules"
@@ -187,12 +187,19 @@ func (c *Client) SendTransaction(tx Transaction) (string, error) {
 func (c *Client) SendRawTransaction(tx Transaction) (string, error) {
 	to := ethgo.HexToAddress(tx.To)
 
-	if tx.Gas == 0 {
-		gas, err := c.EstimateGas(tx)
-		if err != nil {
-			return "", err
-		}
-		tx.Gas = gas
+	gasPrice, err := c.GasPrice()
+	if err != nil {
+		return "", fmt.Errorf("failed to get gas price: %e", err)
+	}
+
+	gas, err := c.EstimateGas(tx)
+	if err != nil {
+		return "", fmt.Errorf("failed to estimate gas: %e", err)
+	}
+
+	nonce, err := c.GetNonce(tx.From)
+	if err != nil {
+		return "", fmt.Errorf("failed to get nonce: %e", err)
 	}
 
 	t := &ethgo.Transaction{
@@ -200,10 +207,10 @@ func (c *Client) SendRawTransaction(tx Transaction) (string, error) {
 		From:     ethgo.HexToAddress(tx.From),
 		To:       &to,
 		Value:    big.NewInt(tx.Value),
-		Gas:      tx.Gas,
-		GasPrice: tx.GasPrice,
-		Nonce:    tx.Nonce,
-		Input:    tx.Input,
+		Gas:      gas,
+		GasPrice: gasPrice,
+		Nonce:    nonce,
+		Input:    []byte(tx.Input),
 		ChainID:  c.chainID,
 	}
 
@@ -260,7 +267,7 @@ func (c *Client) GetTransactionReceipt(hash string) (*ethgo.Receipt, error) {
 }
 
 // WaitForTransactionReceipt waits for the transaction receipt for the given transaction hash.
-func (c *Client) WaitForTransactionReceipt(hash string) *ethgo.Receipt {
+func (c *Client) WaitForTransactionReceipt(hash string, maxAttempts int) *ethgo.Receipt {
 	var res *ethgo.Receipt
 	var err error
 
@@ -269,7 +276,7 @@ func (c *Client) WaitForTransactionReceipt(hash string) *ethgo.Receipt {
 			res, err = c.GetTransactionReceipt(hash)
 			return err
 		},
-		120, 500*time.Millisecond,
+		maxAttempts, 500*time.Millisecond,
 	)
 
 	if err != nil {
@@ -295,25 +302,28 @@ func (c *Client) Accounts() ([]string, error) {
 }
 
 // NewContract creates a new contract instance with the given ABI.
-func (c *Client) NewContract(address string, abistr string) (*Contract, error) {
+func (c *Client) NewContract(address string, abistr string, signerKey string) (*Contract, error) {
 	contractABI, err := abi.NewABI(abistr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse abi: %w", err)
 	}
 
+	wallet, err := wallet.NewWalletFromPrivKey([]byte(signerKey))
+	if err != nil {
+		return nil, fmt.Errorf("failed to get wallet from private key: %w", err)
+	}
+
 	opts := []contract.ContractOption{
 		contract.WithJsonRPC(c.client.Eth()),
-		contract.WithSender(c.w),
+		contract.WithSender(wallet),
 	}
 
 	contract := contract.NewContract(ethgo.HexToAddress(address), contractABI, opts...)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create contract: %w", err)
-	}
 
 	return &Contract{
-		Contract: contract,
-		client:   c,
+		Contract:      contract,
+		Client:        c,
+		SignerAddress: wallet.Address().String(),
 	}, nil
 }
 
@@ -339,15 +349,25 @@ func (c *Client) DeployContract(abistr string, bytecode string, args ...interfac
 	// Deploy contract
 	txn, err := contract.DeployContract(contractABI, contractBytecode, args, opts...)
 	if err != nil {
-		return nil, fmt.Errorf("failed to deploy contract: %w", err)
+		return nil, fmt.Errorf("failed to deploy contract: %w, args: %s", err, args)
 	}
+
+	blockNumber, err := c.BlockNumber()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get block number: %w", err)
+	}
+	block, err := c.GetBlockByNumber(ethgo.BlockNumber(blockNumber), false)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get block: %w", err)
+	}
+
 	txn.WithOpts(&contract.TxnOpts{
-		GasLimit: 1500000,
+		GasLimit: block.GasLimit,
 	})
 
 	err = txn.Do()
 	if err != nil {
-		return nil, fmt.Errorf("failed to deploy contract: %w", err)
+		return nil, fmt.Errorf("failed to deploy contract txn.Do() stage: %w", err)
 	}
 
 	receipt, err := txn.Wait()
