@@ -75,8 +75,8 @@ func (mi *ModuleInstance) NewClient(call sobek.ConstructorCall) *sobek.Object {
 		common.Throw(rt, fmt.Errorf("invalid options; reason: %w", err))
 	}
 
-	if opts.URL == "" {
-		opts.URL = "http://localhost:9090/solana"
+	if opts.ProxyURL == "" {
+		opts.ProxyURL = "http://localhost:9090/solana"
 	}
 
 	if opts.PrivateKey == "" {
@@ -102,13 +102,13 @@ func (mi *ModuleInstance) NewClient(call sobek.ConstructorCall) *sobek.Object {
 		wa = w
 	}
 
-	c, err := jsonrpc.NewClient(opts.URL)
+	c, err := jsonrpc.NewClient(opts.ProxyURL)
 	if err != nil {
 		common.Throw(rt, fmt.Errorf("can't create a new rpc client; reason: %w", err))
 	}
 
 	cTmp := &ClientTmp{
-		client: jsonrpcTmp.NewClient(opts.URL),
+		client: jsonrpcTmp.NewClient(opts.ProxyURL),
 		ctx:    context.Background(),
 	}
 
@@ -121,6 +121,7 @@ func (mi *ModuleInstance) NewClient(call sobek.ConstructorCall) *sobek.Object {
 	// } else {
 	cid := opts.ChainId
 	// }
+	tracer := &Tracer{url: opts.TracerURL}
 
 	client := &Client{
 		vu:        mi.vu,
@@ -130,6 +131,7 @@ func (mi *ModuleInstance) NewClient(call sobek.ConstructorCall) *sobek.Object {
 		w:         wa,
 		chainID:   cid,
 		opts:      opts,
+		tracer:    tracer,
 	}
 
 	// go client.pollForBlocks()
@@ -178,7 +180,8 @@ func (c *Client) reportErrorMetrics(call string) {
 
 // options defines configuration options for the client.
 type options struct {
-	URL        string   `json:"url,omitempty"`
+	TracerURL  string   `json:"tracerUrl,omitempty"`
+	ProxyURL   string   `json:"proxyUrl,omitempty"`
 	Mnemonic   string   `json:"mnemonic,omitempty"`
 	PrivateKey string   `json:"privateKey,omitempty"`
 	ChainId    *big.Int `json:"chainId,omitempty"`

@@ -5,10 +5,12 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"bytes"
 	"math/big"
 	"strconv"
 	"sync"
 	"time"
+	"net/http"
 
 	"github.com/umbracle/ethgo"
 	"github.com/umbracle/ethgo/abi"
@@ -34,6 +36,7 @@ type Transaction struct {
 }
 
 type Client struct {
+	tracer    *Tracer
 	w         *wallet.Key
 	client    *jsonrpc.Client
 	clientTmp *ClientTmp
@@ -424,7 +427,7 @@ func (c *Client) pollForBlocks() {
 
 			rootTS := metrics.NewRegistry().RootTagSet()
 			if c.vu != nil && c.vu.State() != nil && rootTS != nil {
-				if _, loaded := blocks.LoadOrStore(c.opts.URL+strconv.FormatUint(blockNumber, 10), true); loaded {
+				if _, loaded := blocks.LoadOrStore(c.opts.ProxyURL+strconv.FormatUint(blockNumber, 10), true); loaded {
 					// We already have a block number for this client, so we can skip this
 					continue
 				}
@@ -476,4 +479,38 @@ func (c *Client) pollForBlocks() {
 			}
 		}
 	}
+}
+
+type Tracer struct {
+	url         string
+}
+
+type RequestParams struct {
+	requestType string
+	method      string
+	params      []interface{}
+}
+
+func (c *Client) CallTracer(r *RequestParams) (*http.Response, error) {
+	contentType := "application/json"
+	body := []byte(fmt.Sprintf(`{
+		"requestType": %q,
+		"method": %q,
+		"params": %v,
+	}`, r.requestType, r.method, r.params))
+
+	client := &http.Client{}
+	req, err := http.NewRequest("POST", c.tracer.url, bytes.NewBuffer(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", contentType)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	return resp, nil
 }
