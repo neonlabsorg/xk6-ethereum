@@ -2,10 +2,12 @@
 package ethereum
 
 import (
+	"io"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"bytes"
+	"math/rand"
 	"math/big"
 	"strconv"
 	"sync"
@@ -485,32 +487,36 @@ type Tracer struct {
 	url         string
 }
 
-type RequestParams struct {
-	requestType string
-	method      string
-	params      []interface{}
-}
-
-func (c *Client) CallTracer(r *RequestParams) (*http.Response, error) {
-	contentType := "application/json"
+func (c *Client) CallTracer(requestType string, method string, params string) (string, error) {
+	id := rand.Intn(1000000)
 	body := []byte(fmt.Sprintf(`{
-		"requestType": %q,
-		"method": %q,
+		"req_type": %v,
+		"method": %v,
 		"params": %v,
-	}`, r.requestType, r.method, r.params))
+		"id": %v,
+		"jsonrpc": "2.0"
+	}`, requestType, method, params, id))
 
 	client := &http.Client{}
-	req, err := http.NewRequest("POST", c.tracer.url, bytes.NewBuffer(body))
+	request, err := http.NewRequest("POST", c.tracer.url, bytes.NewBuffer(body))
 	if err != nil {
-		return nil, err
+		return "", err
 	}
-	req.Header.Set("Content-Type", contentType)
+	request.Header.Set("Content-Type", "application/json")
 
-	resp, err := client.Do(req)
+	response, err := client.Do(request)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
-	defer resp.Body.Close()
 
-	return resp, nil
+	if response.StatusCode != 200 {
+		return "", fmt.Errorf("service returned status code %d", response.StatusCode)
+	}
+	result, err := io.ReadAll(response.Body)
+	if err != nil {
+		return "", err
+	}
+	defer response.Body.Close()
+
+	return string(result), nil
 }
