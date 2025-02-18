@@ -192,9 +192,12 @@ func (c *Client) SendRawTransaction(tx Transaction) (string, error) {
 		return "", fmt.Errorf("failed to get gas price: %e", err)
 	}
 
-	gas, err := c.EstimateGas(tx)
-	if err != nil {
-		return "", fmt.Errorf("failed to estimate gas: %e", err)
+	gas := tx.Gas
+	if gas == 0 {
+		gas, err = c.EstimateGas(tx)
+		if err != nil {
+			return "", fmt.Errorf("failed to estimate gas: %e", err)
+		}
 	}
 
 	nonce, err := c.GetNonce(tx.From)
